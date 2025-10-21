@@ -74,9 +74,12 @@ async def _persist_upload(upload: UploadFile) -> str:
     filename = f"{uuid.uuid4()}{suffix}"
     destination = upload_dir / filename
 
-    contents = await upload.read()
-    destination.write_bytes(contents)
-    await upload.close()
+    try:
+        with destination.open("wb") as buffer:
+            while contents := await upload.read(1024 * 1024):  # Read in 1MB chunks
+                buffer.write(contents)
+    finally:
+        await upload.close()
 
     return str(destination)
 
