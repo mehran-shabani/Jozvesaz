@@ -1,0 +1,168 @@
+"""Task management API routes."""
+
+from __future__ import annotations
+
+import json
+import os
+import uuid
+from pathlib import Path
+from typing import Annotated, Any, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from sqlmodel import Session, select
+
+from ..auth.dependencies import get_current_user
+from ..db import get_session
+from ..models import Task, TaskStatus, User
+
+try:  # pragma: no cover - compatibility shim for Pydantic v1/v2
+    from pydantic import BaseModel, ConfigDict
+except ImportError:  # pragma: no cover
+    from pydantic import BaseModel  # type: ignore
+
+    ConfigDict = None  # type: ignore
+
+
+UPLOAD_SUBDIR = "uploads"
+DEFAULT_STORAGE_ROOT = "./storage"
+DEFAULT_CELERY_QUEUE = "celery"
+
+router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
+
+
+class TaskRead(BaseModel):
+    """Representation of a task returned by the API."""
+
+    id: UUID
+    title: str
+    description: Optional[str] = None
+    status: TaskStatus
+    owner_id: UUID
+
+    if "ConfigDict" in globals() and ConfigDict:  # type: ignore[truthy-function]
+        model_config = ConfigDict(from_attributes=True)  # type: ignore[call-arg]
+    else:
+        class Config:  # pragma: no cover - executed on Pydantic v1
+            orm_mode = True
+
+
+def _serialize_task(task: Task) -> TaskRead:
+    """Serialize a :class:`Task` ORM instance into ``TaskRead``."""
+
+    if hasattr(TaskRead, "model_validate"):
+        return TaskRead.model_validate(task)  # type: ignore[attr-defined]
+    return TaskRead.from_orm(task)  # type: ignore[call-arg]
+
+
+def _ensure_upload_directory() -> Path:
+    """Ensure the uploads directory exists and return its path."""
+
+    root = Path(os.getenv("STORAGE_ROOT", DEFAULT_STORAGE_ROOT))
+    upload_dir = root / UPLOAD_SUBDIR
+
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    return upload_dir
+
+
+async def _persist_upload(upload: UploadFile) -> str:
+    """Persist the uploaded file to disk and return the absolute file path."""
+
+    upload_dir = _ensure_upload_directory()
+    suffix = Path(upload.filename or "").suffix
+    filename = f"{uuid.uuid4()}{suffix}"
+    destination = upload_dir / filename
+
+    contents = await upload.read()
+    destination.write_bytes(contents)
+    await upload.close()
+
+    return str(destination)
+
+
+def _determine_queue_name() -> str:
+    return os.getenv("CELERY_TASK_QUEUE") or os.getenv("CELERY_QUEUE_NAME") or DEFAULT_CELERY_QUEUE
+
+
+def get_redis_client() -> Any:
+    """Instantiate a Redis client using configuration from the environment."""
+
+    redis_url = (
+        os.getenv("CELERY_BROKER_URL")
+        or os.getenv("REDIS_URL")
+        or os.getenv("REDIS_CACHE_URL")
+        or "redis://localhost:6379/0"
+    )
+
+    try:
+        import redis
+    except ImportError as exc:  # pragma: no cover - dependency guard
+        raise RuntimeError("redis package is required to enqueue Celery tasks") from exc
+
+    return redis.Redis.from_url(redis_url, decode_responses=True)
+
+
+def _enqueue_celery_job(redis_client: Any, *, task_id: UUID, file_path: str) -> None:
+    """Push a Celery-compatible job payload onto the Redis queue."""
+
+    payload = json.dumps({"task_id": str(task_id), "file_path": file_path})
+    queue_name = _determine_queue_name()
+    redis_client.rpush(queue_name, payload)
+
+
+@router.post("", response_model=TaskRead, status_code=status.HTTP_202_ACCEPTED)
+async def create_task(
+    title: Annotated[str, Form(...)],
+    description: Annotated[Optional[str], Form(None)],
+    file: Annotated[UploadFile, File(...)],
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    redis_client: Annotated[Any, Depends(get_redis_client)],
+) -> TaskRead:
+    """Create a task, persist its payload, and enqueue follow-up processing."""
+
+    file_path = await _persist_upload(file)
+
+    task = Task(title=title, description=description, owner_id=current_user.id)
+    session.add(task)
+    session.commit()
+    session.refresh(task)
+
+    try:
+        _enqueue_celery_job(redis_client, task_id=task.id, file_path=file_path)
+    finally:
+        close = getattr(redis_client, "close", None)
+        if callable(close):
+            close()
+
+    return _serialize_task(task)
+
+
+@router.get("", response_model=list[TaskRead])
+def list_tasks(
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[TaskRead]:
+    """Return tasks owned by the authenticated user."""
+
+    statement = select(Task).where(Task.owner_id == current_user.id).order_by(Task.created_at.desc())
+    tasks = session.exec(statement).all()
+    return [_serialize_task(task) for task in tasks]
+
+
+@router.get("/{task_id}", response_model=TaskRead)
+def get_task(
+    task_id: UUID,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> TaskRead:
+    """Retrieve a single task owned by the authenticated user."""
+
+    task = session.get(Task, task_id)
+    if not task or task.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    return _serialize_task(task)
+
+
+__all__ = ["router", "get_redis_client"]
