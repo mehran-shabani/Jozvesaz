@@ -37,10 +37,11 @@ class UserStatus(str, Enum):
 class TaskStatus(str, Enum):
     """Workflow status for tasks."""
 
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class User(TimestampMixin, table=True):
@@ -77,7 +78,15 @@ class Task(TimestampMixin, table=True):
     )
     title: str = Field(nullable=False, max_length=255)
     description: Optional[str] = Field(default=None)
-    status: TaskStatus = Field(default=TaskStatus.PENDING, nullable=False)
+    status: TaskStatus = Field(
+        default=TaskStatus.PENDING,
+        nullable=False,
+        max_length=50,
+        sa_column_kwargs={"server_default": "PENDING"},
+    )
+
+    result_path: Optional[str] = Field(default=None, max_length=1024)
+    completed_at: Optional[datetime] = Field(default=None)
 
     owner_id: uuid.UUID = Field(foreign_key="users.id", nullable=False, index=True)
 

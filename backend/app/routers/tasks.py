@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Optional
 from uuid import UUID
@@ -38,6 +39,8 @@ class TaskRead(BaseModel):
     description: Optional[str] = None
     status: TaskStatus
     owner_id: UUID
+    result_path: Optional[str] = None
+    completed_at: Optional[datetime] = None
 
     if "ConfigDict" in globals() and ConfigDict:  # type: ignore[truthy-function]
         model_config = ConfigDict(from_attributes=True)  # type: ignore[call-arg]
