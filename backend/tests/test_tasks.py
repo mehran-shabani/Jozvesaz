@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Iterator
 from uuid import UUID
@@ -14,24 +13,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from backend.app.auth.dependencies import get_current_user
 from backend.app.db import get_session
 from backend.app.models import Task, User
-from backend.app.routers.tasks import get_redis_client, router
-
-
-class _FakeRedis:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
-        self.closed = False
-
-    def rpush(self, name: str, value: str) -> None:
-        self.calls.append((name, value))
-
-    def close(self) -> None:
-        self.closed = True
-
-
-@pytest.fixture()
-def fake_redis() -> _FakeRedis:
-    return _FakeRedis()
+from backend.app.routers.tasks import router
 
 
 @pytest.fixture()
@@ -70,7 +52,7 @@ def other_user(engine) -> User:
 
 
 @pytest.fixture()
-def app(engine, user: User, fake_redis: _FakeRedis) -> FastAPI:
+def app(engine, user: User, task_queue: list[dict[str, str]]) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
 
@@ -81,13 +63,24 @@ def app(engine, user: User, fake_redis: _FakeRedis) -> FastAPI:
     async def get_current_user_override() -> User:
         return user
 
-    def get_redis_client_override() -> _FakeRedis:
-        return fake_redis
-
     app.dependency_overrides[get_session] = get_session_override
     app.dependency_overrides[get_current_user] = get_current_user_override
-    app.dependency_overrides[get_redis_client] = get_redis_client_override
     return app
+
+
+@pytest.fixture()
+def task_queue(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
+    calls: list[dict[str, str]] = []
+
+    class _Result:
+        id = "fake-task-id"
+
+    def _enqueue(*, task_id: str, file_path: str):
+        calls.append({"task_id": task_id, "file_path": file_path})
+        return _Result()
+
+    monkeypatch.setattr("backend.app.routers.tasks.enqueue_transcription", _enqueue)
+    return calls
 
 
 @pytest.fixture()
@@ -106,7 +99,7 @@ def _list_uploads(root: Path) -> list[Path]:
 def test_create_task_persists_file_and_enqueues_job(
     client: TestClient,
     engine,
-    fake_redis: _FakeRedis,
+    task_queue: list[dict[str, str]],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -133,10 +126,8 @@ def test_create_task_persists_file_and_enqueues_job(
     stored_file = uploads[0]
     assert stored_file.read_bytes() == b"hello"
 
-    assert fake_redis.calls
-    queue_name, payload = fake_redis.calls[0]
-    assert queue_name == "celery"
-    message = json.loads(payload)
+    assert task_queue
+    message = task_queue[0]
     assert message["task_id"] == body["id"]
     assert message["file_path"] == str(stored_file)
 

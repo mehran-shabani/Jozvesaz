@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import os
 import uuid
 from contextlib import suppress
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlmodel import Session, select
 
 from ..auth.dependencies import get_current_user
+from ..celery_app import enqueue_transcription
 from ..db import get_session
 from ..models import Task, TaskStatus, User
 
@@ -27,8 +27,6 @@ except ImportError:  # pragma: no cover
 
 UPLOAD_SUBDIR = "uploads"
 DEFAULT_STORAGE_ROOT = "./storage"
-DEFAULT_CELERY_QUEUE = "celery"
-
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
 
@@ -84,44 +82,13 @@ async def _persist_upload(upload: UploadFile) -> str:
     return str(destination)
 
 
-def _determine_queue_name() -> str:
-    return os.getenv("CELERY_TASK_QUEUE") or os.getenv("CELERY_QUEUE_NAME") or DEFAULT_CELERY_QUEUE
-
-
-def get_redis_client() -> "redis.Redis":
-    """Instantiate a Redis client using configuration from the environment."""
-
-    redis_url = (
-        os.getenv("CELERY_BROKER_URL")
-        or os.getenv("REDIS_URL")
-        or os.getenv("REDIS_CACHE_URL")
-        or "redis://localhost:6379/0"
-    )
-
-    try:
-        import redis
-    except ImportError as exc:  # pragma: no cover - dependency guard
-        raise RuntimeError("redis package is required to enqueue Celery tasks") from exc
-
-    return redis.Redis.from_url(redis_url, decode_responses=True)
-
-
-def _enqueue_celery_job(redis_client: Any, *, task_id: UUID, file_path: str) -> None:
-    """Push a Celery-compatible job payload onto the Redis queue."""
-
-    payload = json.dumps({"task_id": str(task_id), "file_path": file_path})
-    queue_name = _determine_queue_name()
-    redis_client.rpush(queue_name, payload)
-
-
 @router.post("", response_model=TaskRead, status_code=status.HTTP_202_ACCEPTED)
 async def create_task(
     title: Annotated[str, Form(...)],
-    description: Annotated[Optional[str], Form(None)],
     file: Annotated[UploadFile, File(...)],
     session: Annotated[Session, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-    redis_client: Annotated[Any, Depends(get_redis_client)],
+    description: Annotated[Optional[str], Form()] = None,
 ) -> TaskRead:
     """Create a task, persist its payload, and enqueue follow-up processing."""
 
@@ -132,7 +99,7 @@ async def create_task(
 
     try:
         session.flush()
-        _enqueue_celery_job(redis_client, task_id=task.id, file_path=file_path)
+        enqueue_transcription(task_id=str(task.id), file_path=file_path)
         session.commit()
         session.refresh(task)
     except Exception:
@@ -140,10 +107,6 @@ async def create_task(
         with suppress(OSError):
             Path(file_path).unlink(missing_ok=True)
         raise
-    finally:
-        close = getattr(redis_client, "close", None)
-        if callable(close):
-            close()
 
     return _serialize_task(task)
 
@@ -175,4 +138,4 @@ def get_task(
     return _serialize_task(task)
 
 
-__all__ = ["router", "get_redis_client"]
+__all__ = ["router"]
