@@ -19,7 +19,8 @@ from backend.app.models import TaskStatus
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STORAGE_ROOT = "/storage"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_STORAGE_ROOT = REPOSITORY_ROOT / "storage"
 UPLOAD_SUBDIR = "uploads"
 RESULTS_SUBDIR = "results"
 
@@ -31,7 +32,10 @@ class TaskNotFoundError(RuntimeError):
 def _storage_root() -> Path:
     """Return the root directory used for storage operations."""
 
-    return Path(os.getenv("STORAGE_ROOT", DEFAULT_STORAGE_ROOT))
+    override = os.getenv("STORAGE_ROOT")
+    if override:
+        return Path(override)
+    return DEFAULT_STORAGE_ROOT
 
 
 def _resolve_upload_path(file_path: str) -> Path:
@@ -40,7 +44,23 @@ def _resolve_upload_path(file_path: str) -> Path:
     candidate = Path(file_path)
     if candidate.is_absolute():
         return candidate
-    return _storage_root() / UPLOAD_SUBDIR / file_path
+
+    storage_root = _storage_root()
+    storage_parts = storage_root.parts
+    candidate_parts = candidate.parts
+
+    if storage_parts and candidate_parts[: len(storage_parts)] == storage_parts:
+        remainder = candidate_parts[len(storage_parts) :]
+        return storage_root.joinpath(*remainder)
+
+    if candidate_parts and candidate_parts[0] == storage_root.name:
+        remainder = candidate_parts[1:]
+        return storage_root.joinpath(*remainder)
+
+    if candidate_parts and candidate_parts[0] == UPLOAD_SUBDIR:
+        return storage_root.joinpath(*candidate_parts)
+
+    return storage_root / UPLOAD_SUBDIR / candidate
 
 
 def _result_path(task_id: uuid.UUID) -> Path:

@@ -8,6 +8,45 @@ from pathlib import Path
 import pytest
 from sqlmodel import SQLModel
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from worker.app import _ensure_backend_on_path
+
+_ensure_backend_on_path()
+
+@pytest.mark.parametrize(
+    "relative_builder",
+    (
+        lambda storage_root, source: Path("uploads") / source.name,
+        lambda storage_root, source: Path(storage_root.name) / "uploads" / source.name,
+    ),
+)
+def test_transcribe_audio_accepts_relative_upload_paths(worker_environment, relative_builder):
+    tasks_module, models_module, db_module = worker_environment
+    task_id = _create_user_and_task(db_module, models_module)
+
+    storage_root = Path(os.environ["STORAGE_ROOT"])
+    uploads_dir = storage_root / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    source = uploads_dir / "input.txt"
+    source.write_text("relative data", encoding="utf-8")
+
+    relative_path = relative_builder(storage_root, source)
+
+    result = tasks_module.transcribe_audio.run(task_id=str(task_id), file_path=str(relative_path))
+    assert result["task_id"] == str(task_id)
+    result_path = Path(result["result_path"])
+    assert result_path.exists()
+    assert "relative data" in result_path.read_text(encoding="utf-8")
+
+    with db_module.session_scope() as session:
+        updated = session.get(models_module.Task, task_id)
+        assert updated is not None
+        assert updated.status == models_module.TaskStatus.COMPLETED
+        assert updated.result_path == str(result_path)
+
 
 @pytest.fixture()
 def worker_environment(tmp_path, monkeypatch):

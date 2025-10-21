@@ -20,6 +20,9 @@ dev = [
     "pytest",
 ]
 
+[tool.setuptools.package-dir]
+"" = ".."
+
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["worker", "worker.*"]
+where = [".."]
+include = ["worker", "worker.*", "backend", "backend.*"]

@@ -22,6 +22,8 @@ shared backend modules (database models, Celery configuration) that live in the
 ## Storage layout
 
 The worker expects uploads to be located under `${STORAGE_ROOT}/uploads` and
-writes transcription results to `${STORAGE_ROOT}/results`. By default
-`STORAGE_ROOT` falls back to `/storage` so the folders resolve to
-`/storage/uploads` and `/storage/results`.
+writes transcription results to `${STORAGE_ROOT}/results`. By default the
+storage root resolves to the repository-level `storage/` directory, so relative
+paths produced by the backend API are discovered automatically. You can
+override `STORAGE_ROOT` with any absolute path shared between the backend and
+worker processes.
