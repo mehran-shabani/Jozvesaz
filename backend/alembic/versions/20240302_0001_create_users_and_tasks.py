@@ -2,49 +2,16 @@
 
 from __future__ import annotations
 
-import uuid
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import func
-from sqlalchemy.types import CHAR, TypeDecorator
+from sqlmodel.sql.sqltypes import GUID
 
 # revision identifiers, used by Alembic.
 revision = "20240302_0001"
 down_revision = None
 branch_labels = None
 depends_on = None
-
-
-class GUID(TypeDecorator):
-    """Platform-independent GUID/UUID type."""
-
-    impl = CHAR
-    cache_ok = True
-
-    def load_dialect_impl(self, dialect):  # type: ignore[override]
-        if dialect.name == "postgresql":
-            from sqlalchemy.dialects.postgresql import UUID
-
-            return dialect.type_descriptor(UUID(as_uuid=True))
-        return dialect.type_descriptor(CHAR(36))
-
-    def process_bind_param(self, value, dialect):  # type: ignore[override]
-        if value is None:
-            return value
-        if not isinstance(value, uuid.UUID):
-            value = uuid.UUID(str(value))
-        if dialect.name == "postgresql":
-            return value
-        return str(value)
-
-    def process_result_value(self, value, dialect):  # type: ignore[override]
-        if value is None:
-            return value
-        if isinstance(value, uuid.UUID):
-            return value
-        return uuid.UUID(str(value))
-
 
 def upgrade() -> None:
     op.create_table(
