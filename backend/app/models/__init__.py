@@ -5,10 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import func
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, SQLModel
 
 
 class TimestampMixin(SQLModel):
@@ -61,10 +61,8 @@ class User(TimestampMixin, table=True):
         sa_column_kwargs={"unique": True},
     )
     full_name: Optional[str] = Field(default=None, max_length=255)
+    hashed_password: str = Field(nullable=False, max_length=255)
     status: UserStatus = Field(default=UserStatus.ACTIVE, nullable=False)
-
-    tasks: List["Task"] = Relationship(back_populates="owner")
-
 
 class Task(TimestampMixin, table=True):
     """Represents a unit of work owned by a user."""
@@ -82,7 +80,6 @@ class Task(TimestampMixin, table=True):
     status: TaskStatus = Field(default=TaskStatus.PENDING, nullable=False)
 
     owner_id: uuid.UUID = Field(foreign_key="users.id", nullable=False, index=True)
-    owner: Optional[User] = Relationship(back_populates="tasks")
 
 
 __all__ = [
