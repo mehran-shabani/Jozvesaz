@@ -88,7 +88,7 @@ def _determine_queue_name() -> str:
     return os.getenv("CELERY_TASK_QUEUE") or os.getenv("CELERY_QUEUE_NAME") or DEFAULT_CELERY_QUEUE
 
 
-def get_redis_client() -> Any:
+def get_redis_client() -> "redis.Redis":
     """Instantiate a Redis client using configuration from the environment."""
 
     redis_url = (
