@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any, Optional
 from uuid import UUID
@@ -125,11 +126,17 @@ async def create_task(
 
     task = Task(title=title, description=description, owner_id=current_user.id)
     session.add(task)
-    session.commit()
-    session.refresh(task)
 
     try:
+        session.flush()
         _enqueue_celery_job(redis_client, task_id=task.id, file_path=file_path)
+        session.commit()
+        session.refresh(task)
+    except Exception:
+        session.rollback()
+        with suppress(OSError):
+            Path(file_path).unlink(missing_ok=True)
+        raise
     finally:
         close = getattr(redis_client, "close", None)
         if callable(close):
