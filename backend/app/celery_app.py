@@ -6,7 +6,6 @@ import os
 from typing import Any
 
 from celery import Celery
-from celery.app.task import Task
 from celery.result import AsyncResult
 
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
@@ -53,21 +52,14 @@ celery_app.conf.update(
 )
 
 
-@celery_app.task(name="jozvesaz.tasks.transcribe_audio", bind=True)
-def transcribe_audio(self: Task, task_id: str, file_path: str) -> dict[str, Any]:
-    """Celery task entry point for audio transcription jobs.
-
-    The heavy lifting is delegated to the worker service. Returning the payload
-    provides an auditable record in the result backend for debugging purposes.
-    """
-
-    return {"task_id": task_id, "file_path": file_path}
+TRANSCRIBE_AUDIO_TASK_NAME = "jozvesaz.tasks.transcribe_audio"
 
 
 def enqueue_transcription(*, task_id: str, file_path: str) -> AsyncResult:
     """Send a transcription job to the Celery worker queue."""
 
-    return transcribe_audio.delay(task_id=task_id, file_path=file_path)
+    payload: dict[str, Any] = {"task_id": task_id, "file_path": file_path}
+    return celery_app.send_task(TRANSCRIBE_AUDIO_TASK_NAME, kwargs=payload)
 
 
-__all__ = ["celery_app", "transcribe_audio", "enqueue_transcription"]
+__all__ = ["celery_app", "enqueue_transcription", "TRANSCRIBE_AUDIO_TASK_NAME"]
