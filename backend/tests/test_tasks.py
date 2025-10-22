@@ -184,3 +184,121 @@ def test_get_task_returns_404_for_missing_or_foreign_task(
 
     forbidden = client.get(f"/api/v1/tasks/{other.id}")
     assert forbidden.status_code == 404
+
+
+def test_get_task_result_returns_content(
+    client: TestClient,
+    engine,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
+
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+
+    with Session(engine) as session:
+        task = Task(title="Mine", description=None, owner_id=user.id)
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+        task_id = task.id
+        destination = result_dir / f"{task_id}.txt"
+        destination.write_text("Hello world", encoding="utf-8")
+        task.result_path = str(destination)
+        session.add(task)
+        session.commit()
+
+    response = client.get(f"/api/v1/tasks/{task_id}/result")
+    assert response.status_code == 200
+    assert response.text == "Hello world"
+
+
+def test_get_task_result_returns_404_when_missing(
+    client: TestClient,
+    engine,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
+
+    with Session(engine) as session:
+        task = Task(title="Mine", description=None, owner_id=user.id, result_path="results/missing.txt")
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+        task_id = task.id
+
+    response = client.get(f"/api/v1/tasks/{task_id}/result")
+    assert response.status_code == 404
+
+
+def test_update_task_result_persists_content(
+    client: TestClient,
+    engine,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
+
+    with Session(engine) as session:
+        task = Task(title="Mine", description=None, owner_id=user.id)
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+        task_id = task.id
+
+    response = client.put(
+        f"/api/v1/tasks/{task_id}/result",
+        json={"content": "Updated result"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result_path"]
+
+    with Session(engine) as session:
+        updated = session.exec(select(Task).where(Task.id == task_id)).first()
+        assert updated is not None
+        assert updated.result_path == body["result_path"]
+        stored = Path(updated.result_path)
+        assert stored.exists()
+        assert stored.read_text(encoding="utf-8") == "Updated result"
+
+
+def test_update_task_result_rejects_foreign_task(
+    app: FastAPI,
+    engine,
+    user: User,
+    other_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
+
+    with Session(engine) as session:
+        task = Task(title="Mine", description=None, owner_id=user.id)
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+        task_id = task.id
+
+    original_override = app.dependency_overrides[get_current_user]
+
+    async def get_other_user() -> User:
+        return other_user
+
+    app.dependency_overrides[get_current_user] = get_other_user
+
+    try:
+        with TestClient(app) as other_client:
+            response = other_client.put(
+                f"/api/v1/tasks/{task_id}/result",
+                json={"content": "nope"},
+            )
+        assert response.status_code == 404
+    finally:
+        app.dependency_overrides[get_current_user] = original_override
