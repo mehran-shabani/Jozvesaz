@@ -3,9 +3,7 @@
 import Link from "next/link";
 import useSWR from "swr";
 
-import { API_BASE_URL } from "@/lib/constants";
-
-const TASKS_ENDPOINT = `${API_BASE_URL}/api/v1/tasks`;
+const TASKS_ENDPOINT = `/api/tasks`;
 
 const fetchTasks = async (url: string): Promise<Task[]> => {
   const response = await fetch(url, {

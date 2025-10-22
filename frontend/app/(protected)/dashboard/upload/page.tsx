@@ -4,7 +4,6 @@ import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 
-import { API_BASE_URL } from "@/lib/constants";
 
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 
@@ -62,7 +61,7 @@ export default function UploadPage() {
       formData.append("title", title);
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/tasks`, {
+        const response = await fetch("/api/tasks", {
           method: "POST",
           body: formData,
           credentials: "include",

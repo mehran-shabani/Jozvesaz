@@ -11,11 +11,9 @@ import "react-quill/dist/quill.snow.css";
 
 const ReactQuill = dynamic(() => import("react-quill"), { ssr: false });
 
-const TASK_RESULT_ENDPOINT = (taskId: string) =>
-  `${API_BASE_URL}/api/v1/tasks/${taskId}/result`;
+const TASK_RESULT_ENDPOINT = (taskId: string) => `/api/tasks/${taskId}/result`;
 
-const TASK_DETAILS_ENDPOINT = (taskId: string) =>
-  `${API_BASE_URL}/api/v1/tasks/${taskId}`;
+const TASK_DETAILS_ENDPOINT = (taskId: string) => `/api/tasks/${taskId}`;
 
 const toolbarOptions = [
   [{ header: [1, 2, 3, false] }],
@@ -134,6 +132,7 @@ async function fetchTaskResultCandidates(task: Task): Promise<string> {
     if (/^https?:\/\//i.test(task.result_path)) {
       candidates.push(task.result_path);
     } else if (task.result_path.startsWith("/")) {
+      candidates.push(task.result_path);
       candidates.push(`${API_BASE_URL}${task.result_path}`);
 
       const storageIndex = task.result_path.indexOf("/storage/");
