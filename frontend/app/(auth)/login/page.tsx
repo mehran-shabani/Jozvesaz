@@ -58,8 +58,6 @@ export default function LoginPage() {
 
     if (!password) {
       nextErrors.password = "رمز عبور را وارد کنید.";
-    } else if (password.length < 8) {
-      nextErrors.password = "رمز عبور باید حداقل ۸ کاراکتر باشد.";
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -134,9 +132,7 @@ export default function LoginPage() {
             <p id="password-error" className="text-xs text-rose-400">
               {fieldErrors.password}
             </p>
-          ) : (
-            <p className="text-xs text-slate-400">رمز عبور باید حداقل ۸ کاراکتر باشد.</p>
-          )}
+          ) : null}
         </div>
         {(fieldErrors.form || error) ? (
           <div className="rounded-md border border-rose-500/50 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
