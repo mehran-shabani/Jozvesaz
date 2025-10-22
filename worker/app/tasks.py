@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,9 +13,26 @@ from typing import Any
 from celery.app.task import Task
 
 from backend.app.celery_app import TRANSCRIBE_AUDIO_TASK_NAME, celery_app
-from backend.app.db import session_scope
 from backend.app.models import Task as DbTask
 from backend.app.models import TaskStatus
+from worker.app import monitoring as _monitoring  # ensure signal handlers are registered
+from worker.app.transcription import get_transcription_model
+
+_ = _monitoring  # Explicitly reference to avoid lint complaints about unused import
+
+
+@contextmanager
+def _session_scope():
+    """Delegate to the backend session factory at call time.
+
+    Importing the backend database module lazily avoids holding on to stale
+    engines during test runs that repeatedly reload modules.
+    """
+
+    from backend.app import db as backend_db
+
+    with backend_db.session_scope() as session:
+        yield session
 
 logger = logging.getLogger(__name__)
 
@@ -89,36 +106,12 @@ def _update_task(
 ) -> None:
     """Persist task state transitions in the database."""
 
-    with session_scope() as session:
+    with _session_scope() as session:
         task = _fetch_task(session, task_id)
         task.status = status
         task.result_path = result_path
         task.completed_at = completed_at
         session.add(task)
-
-
-def _build_transcription(input_path: Path) -> str:
-    """Generate placeholder transcription content for ``input_path``."""
-
-    raw = input_path.read_bytes()
-    try:
-        decoded = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        decoded = raw.decode("utf-8", errors="ignore")
-
-    text = decoded.strip()
-    if not text:
-        text = f"[binary content: {len(raw)} bytes]"
-
-    timestamp = datetime.now(timezone.utc).isoformat()
-    return "\n".join(
-        [
-            f"# Transcription for {input_path.name}",
-            f"Generated at {timestamp}",
-            "",
-            text,
-        ]
-    )
 
 
 @celery_app.task(name=TRANSCRIBE_AUDIO_TASK_NAME, bind=True)
@@ -141,7 +134,8 @@ def transcribe_audio(self: Task, task_id: str, file_path: str) -> dict[str, Any]
         if not source_path.exists():
             raise FileNotFoundError(f"Input file {source_path} does not exist")
 
-        transcription = _build_transcription(source_path)
+        model = get_transcription_model()
+        transcription = model.transcribe(source_path)
         destination_path.write_text(transcription, encoding="utf-8")
     except Exception:
         with suppress(OSError):
