@@ -228,12 +228,7 @@ export default function TaskDetailsPage({
 
   useEffect(() => {
     if (!task || hasLoadedInitialContent) {
-      if (task && hasLoadedInitialContent) {
-        return;
-      }
-      if (!task) {
-        return;
-      }
+      return;
     }
 
     let cancelled = false;
@@ -241,16 +236,14 @@ export default function TaskDetailsPage({
       if (!task) return;
 
       if (!task.result_path) {
-        if (!cancelled) {
-          setEditorContent("");
-          setHasLoadedInitialContent(true);
-          setResultError(null);
-        }
         return;
       }
 
-      setIsResultLoading(true);
-      setResultError(null);
+      if (!cancelled) {
+        setIsResultLoading(true);
+        setResultError(null);
+      }
+
       try {
         const text = await fetchTaskResultCandidates(task);
         if (!cancelled) {
