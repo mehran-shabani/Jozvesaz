@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import func
+from sqlalchemy import Column, DateTime, event, func
 from sqlmodel import Field, SQLModel
 
 
@@ -86,7 +86,10 @@ class Task(TimestampMixin, table=True):
     )
 
     result_path: Optional[str] = Field(default=None, max_length=1024)
-    completed_at: Optional[datetime] = Field(default=None)
+    completed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     owner_id: uuid.UUID = Field(foreign_key="users.id", nullable=False, index=True)
 
@@ -98,3 +101,11 @@ __all__ = [
     "User",
     "UserStatus",
 ]
+
+
+@event.listens_for(Task, "load")
+def _apply_utc_timezone(task: Task, _context: Any) -> None:
+    """Ensure ``Task.completed_at`` retains UTC tzinfo when loaded."""
+
+    if task.completed_at is not None and task.completed_at.tzinfo is None:
+        task.completed_at = task.completed_at.replace(tzinfo=timezone.utc)
