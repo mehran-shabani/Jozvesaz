@@ -70,7 +70,15 @@ export default function UploadPage() {
 
         if (!response.ok) {
           const payload = await response.json().catch(() => null);
-          const detail = payload && typeof payload === 'object' && payload.detail ? payload.detail : "آپلود با خطا مواجه شد.";
+          const detail =
+            payload && typeof payload === "object" && "detail" in payload
+              ? Array.isArray(payload.detail)
+                ? payload.detail.join(" ")
+                : String(payload.detail)
+              : "آپلود با خطا مواجه شد.";
+          setStatus("error");
+          setError(detail);
+          return;
         }
 
         // FastAPI returns 202 Accepted with the created task payload.
