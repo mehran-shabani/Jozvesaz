@@ -6,10 +6,32 @@ import { FormEvent, useState } from "react";
 
 import { useAuth } from "@/hooks/use-auth";
 
+const DEFAULT_REDIRECT = "/dashboard";
+const SAFE_REDIRECT_BASE_URL = "https://jozvesaz.local";
+
+function getSafeRedirectPath(redirectParam: string | null): string {
+  if (!redirectParam) {
+    return DEFAULT_REDIRECT;
+  }
+
+  try {
+    const candidate = new URL(redirectParam, SAFE_REDIRECT_BASE_URL);
+
+    if (candidate.origin !== SAFE_REDIRECT_BASE_URL) {
+      return DEFAULT_REDIRECT;
+    }
+
+    return `${candidate.pathname}${candidate.search}${candidate.hash}`;
+  } catch {
+    return DEFAULT_REDIRECT;
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("from") ?? "/dashboard";
+  const redirectParam = searchParams.get("from");
+  const redirectTo = getSafeRedirectPath(redirectParam);
   const { login, loading, error } = useAuth();
   const [formError, setFormError] = useState<string | null>(null);
 
