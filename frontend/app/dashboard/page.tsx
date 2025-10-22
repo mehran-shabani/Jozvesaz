@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { LogoutButton } from "@/components/auth/logout-button";
 import { fetchCurrentUser } from "@/lib/auth/server";
 
+import { TaskList } from "./task-list";
+
 export default async function DashboardPage() {
   const user = await fetchCurrentUser();
 
@@ -58,6 +60,7 @@ export default async function DashboardPage() {
             کنید.
           </p>
         </section>
+        <TaskList />
       </main>
     </div>
   );
