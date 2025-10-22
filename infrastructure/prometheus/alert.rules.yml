@@ -1,0 +1,46 @@
+groups:
+  - name: infrastructure-alerts
+    rules:
+      - alert: HighMemoryPressure
+        expr: 1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: |
+            Memory usage has exceeded 85% for more than 5 minutes on {{ $labels.instance }}.
+            Consider scaling vertically by adding RAM or moving workloads.
+
+      - alert: CriticalMemoryPressure
+        expr: 1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical memory usage"
+          description: |
+            Memory usage has exceeded 95% for more than 2 minutes on {{ $labels.instance }}.
+            Immediate action is required to avoid OOM conditions.
+
+      - alert: HighGpuUtilization
+        expr: max_over_time(DCGM_FI_DEV_GPU_UTIL[5m]) > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sustained GPU utilization above 90%"
+          description: |
+            GPU {{ $labels.uuid }} has been above 90% utilization for 5 minutes.
+            Evaluate whether to scale GPU capacity or redistribute workloads.
+
+      - alert: GpuMemorySaturation
+        expr: (DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "GPU memory saturation"
+          description: |
+            GPU memory usage on {{ $labels.uuid }} exceeded 90% for 5 minutes.
+            Plan GPU memory upgrades or reduce workload size.

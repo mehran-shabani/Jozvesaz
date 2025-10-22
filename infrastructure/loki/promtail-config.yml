@@ -1,0 +1,38 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+positions:
+  filename: /tmp/positions.yaml
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+scrape_configs:
+  - job_name: docker-logs
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+    pipeline_stages:
+      - docker:
+          drop_original: true
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(backend|worker|nginx|frontend).*'
+        action: keep
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: container
+        replacement: '$1'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: service
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: project
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: job
+        replacement: '$1-logs'
+  - job_name: nginx-host-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx-host
+          service: nginx
+          __path__: /var/log/nginx/*.log

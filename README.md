@@ -33,15 +33,57 @@ This repository hosts the frontend, backend, worker, and infrastructure configur
 
 ### Service wiring
 
-| Service   | Ports | Depends on        | Environment files                                           |
-|-----------|-------|-------------------|-------------------------------------------------------------|
-| frontend  | 3000  | backend           | `../.env`, `../frontend/.env.local`                         |
-| backend   | 4000  | postgres, redis   | `../.env`, `../backend/.env`                                |
-| worker    | –     | backend, redis    | `../.env`, `../worker/.env`                                 |
-| redis     | 6379  | –                 | `./redis/.env`                                              |
-| postgres  | 5432  | –                 | `./postgres/.env`                                           |
+| Service        | Ports | Depends on        | Environment files                                           |
+|----------------|-------|-------------------|-------------------------------------------------------------|
+| frontend       | 3000  | backend           | `../.env`, `../frontend/.env.local`                         |
+| backend        | 4000  | postgres, redis   | `../.env`, `../backend/.env`                                |
+| worker         | –     | backend, redis    | `../.env`, `../worker/.env`                                 |
+| redis          | 6379  | –                 | `./redis/.env`                                              |
+| postgres       | 5432  | –                 | `./postgres/.env`                                           |
+| prometheus     | 9090  | node-exporter, cadvisor | –                                                   |
+| grafana        | 3001  | prometheus, loki  | `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD` (optional)  |
+| loki           | 3100  | –                 | –                                                           |
+| promtail       | –     | loki              | –                                                           |
+| node-exporter  | 9100  | –                 | –                                                           |
+| cadvisor       | 8080  | –                 | –                                                           |
+| dcgm-exporter* | 9400  | –                 | Requires NVIDIA runtime                                     |
 
 The Compose file automatically loads the repository-level `.env` alongside each service-specific file, so shared values such as connection strings stay consistent across the stack.
+
+\* `dcgm-exporter` is disabled by default and only starts when you run Compose with the `gpu` profile on a host that exposes the NVIDIA runtime.
+
+### Observability stack
+
+The Compose file now bundles Prometheus, Grafana, Loki, and supporting exporters so you can monitor the platform end-to-end.
+
+1. **Metrics collection**
+   * `node-exporter` exposes host-level CPU, RAM, and disk metrics on port `9100` (run Compose with sufficient privileges so the container can mount `/proc`, `/sys`, and the root filesystem read-only).
+   * `cadvisor` emits per-container statistics on port `8080` and requires access to the Docker socket and host cgroups.
+   * `prometheus` scrapes the exporters and the backend `/metrics` endpoint (enable FastAPI instrumentation with [Prometheus FastAPI Instrumentator](https://github.com/trallnag/prometheus-fastapi-instrumentator) or similar) and evaluates the alert rules under `infrastructure/prometheus/alert.rules.yml`.
+   * Optional `dcgm-exporter` publishes GPU metrics on port `9400`. Start it with the GPU profile when NVIDIA drivers are available:
+     ```bash
+     docker compose -f infrastructure/docker-compose.yml --profile gpu up -d dcgm-exporter
+     ```
+
+2. **Dashboards and alerts**
+   * Grafana listens on port `3001` (default admin credentials come from `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`).
+   * Datasources for Prometheus and Loki are provisioned automatically from `infrastructure/grafana/provisioning/datasources/datasource.yml` and the starter dashboard in `infrastructure/grafana/dashboards/system-overview.json` visualises CPU, RAM, and GPU utilisation.
+   * Prometheus alert rules raise `HighMemoryPressure`, `CriticalMemoryPressure`, `HighGpuUtilization`, and `GpuMemorySaturation` events so you can wire notifications through Alertmanager or Grafana.
+
+3. **Centralised logging**
+   * Loki stores logs at port `3100` using the configuration in `infrastructure/loki/loki-config.yml`.
+   * Promtail tails Docker logs (backend/FastAPI, worker/Celery, nginx) via `infrastructure/loki/promtail-config.yml`. Ensure the Compose project has permission to mount `/var/lib/docker/containers`, `/var/log`, and `/var/run/docker.sock` from the host so Promtail can read container logs.
+   * In Grafana add Log panels or use the Explore tab with the `Loki` datasource to query logs using labels such as `{service="backend"}` or `{service="nginx"}`.
+
+### Scaling guidance
+
+The default alerts warn when RAM or GPU memory consistently exceeds safe thresholds. When you see frequent `CriticalMemoryPressure` alerts:
+
+* **Short term mitigation:** restart noisy processes, prune unused containers, or temporarily scale out by adding application replicas.
+* **Vertical scaling:** upgrade the host to at least **32 GB RAM** for moderate workloads (sustained FastAPI + Celery queue processing) and **64 GB RAM** when you regularly process concurrent GPU jobs or large uploads.
+* **GPU planning:** combine the `HighGpuUtilization` and `GpuMemorySaturation` alerts to decide whether to add additional GPUs or switch to cards with larger VRAM.
+
+Document the hardware change in your infrastructure runbooks so that capacity planning reflects the new baseline.
 
 ## Running services directly with systemd (without Docker)
 
